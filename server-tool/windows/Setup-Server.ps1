@@ -1,9 +1,10 @@
-# Installs (or updates) a NeoForge + Create server in server-tool\server\
+# Installs (or updates) a NeoForge or Fabric + Create server in server-tool\server\
 # using the settings in server.env. Safe to run again after changing settings.
 . (Join-Path $PSScriptRoot 'Common.ps1')
 
 $cfg        = Read-ServerEnv
 $mcVersion  = Get-Setting $cfg 'VERSION' '1.21.1'
+$loader     = (Get-Setting $cfg 'LOADER' 'NEOFORGE').ToUpper()
 $neoVersion = Get-Setting $cfg 'NEOFORGE_VERSION' '21.1.267'
 $javaMajor  = if ($cfg['JAVA_IMAGE_TAG'] -match 'java(\d+)') { [int]$Matches[1] } else { 21 }
 $port       = Get-Setting $cfg 'SERVER_PORT' '25565'
@@ -15,7 +16,8 @@ $runtimeDir  = Join-Path $ToolRoot 'runtime'
 $downloadDir = Join-Path $ToolRoot 'downloads'
 New-Item -ItemType Directory -Force -Path $serverDir, $downloadDir | Out-Null
 
-Write-Host "Setting up a Create server: Minecraft $mcVersion, NeoForge $neoVersion, Java $javaMajor" -ForegroundColor Cyan
+$loaderText = if ($loader -eq 'FABRIC') { 'Fabric' } else { "NeoForge $neoVersion" }
+Write-Host "Setting up a Create server: Minecraft $mcVersion, $loaderText, Java $javaMajor" -ForegroundColor Cyan
 
 # --- 0. EULA ----------------------------------------------------------------
 if ((Get-Setting $cfg 'EULA' 'FALSE') -ine 'TRUE') {
@@ -44,19 +46,45 @@ if (-not ((Test-Path $javaExe) -and (Test-Path $marker))) {
 }
 Write-Host "Java ready: $javaExe"
 
-# --- 2. NeoForge server -----------------------------------------------------
-$neoMarker = Join-Path $serverDir '.neoforge-version'
-if (-not ((Test-Path $neoMarker) -and ((Get-Content $neoMarker) -eq $neoVersion))) {
-    Write-Host "Downloading and installing NeoForge $neoVersion..."
-    $installer = Join-Path $downloadDir "neoforge-$neoVersion-installer.jar"
-    $url = "https://maven.neoforged.net/releases/net/neoforged/neoforge/$neoVersion/neoforge-$neoVersion-installer.jar"
-    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer
-    Push-Location $serverDir
-    try {
-        & $javaExe -jar $installer --installServer $serverDir
-        if ($LASTEXITCODE -ne 0) { throw "NeoForge installer failed (exit code $LASTEXITCODE)" }
-    } finally { Pop-Location }
-    Set-Content -Path $neoMarker -Value $neoVersion
+# --- 2. Mod loader server ------------------------------------------------------
+if ($loader -eq 'FABRIC') {
+    # Fabric: download the official server launcher and write a run.bat for it.
+    $meta = 'https://meta.fabricmc.net/v2/versions'
+    $fabricLoader = Get-Setting $cfg 'FABRIC_LOADER_VERSION' ''
+    if (-not $fabricLoader) {
+        $fabricLoader = (Invoke-RestMethod -Uri "$meta/loader/$mcVersion" | Where-Object { $_.loader.stable } | Select-Object -First 1).loader.version
+    }
+    if (-not $fabricLoader) { throw "Fabric has no loader for Minecraft $mcVersion yet." }
+    $fabricInstaller = (Invoke-RestMethod -Uri "$meta/installer" | Where-Object { $_.stable } | Select-Object -First 1).version
+    $fabricMarker = Join-Path $serverDir '.fabric-version'
+    $want = "$mcVersion/$fabricLoader/$fabricInstaller"
+    if (-not ((Test-Path $fabricMarker) -and ((Get-Content $fabricMarker) -eq $want))) {
+        Write-Host "Downloading Fabric server launcher (loader $fabricLoader)..."
+        Invoke-WebRequest -UseBasicParsing -Uri "$meta/loader/$mcVersion/$fabricLoader/$fabricInstaller/server/jar" `
+            -OutFile (Join-Path $serverDir 'fabric-server-launch.jar')
+        Set-Content -Path $fabricMarker -Value $want
+    }
+    # Forget any NeoForge install so switching back reinstalls its run.bat.
+    Remove-Item -Force (Join-Path $serverDir '.neoforge-version') -ErrorAction SilentlyContinue
+    Set-Content -Path (Join-Path $serverDir 'run.bat') -Encoding ASCII -Value @(
+        '@echo off',
+        'java @user_jvm_args.txt -jar fabric-server-launch.jar %*',
+        'pause'
+    )
+} else {
+    $neoMarker = Join-Path $serverDir '.neoforge-version'
+    if (-not ((Test-Path $neoMarker) -and ((Get-Content $neoMarker) -eq $neoVersion))) {
+        Write-Host "Downloading and installing NeoForge $neoVersion..."
+        $installer = Join-Path $downloadDir "neoforge-$neoVersion-installer.jar"
+        $url = "https://maven.neoforged.net/releases/net/neoforged/neoforge/$neoVersion/neoforge-$neoVersion-installer.jar"
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer
+        Push-Location $serverDir
+        try {
+            & $javaExe -jar $installer --installServer $serverDir
+            if ($LASTEXITCODE -ne 0) { throw "NeoForge installer failed (exit code $LASTEXITCODE)" }
+        } finally { Pop-Location }
+        Set-Content -Path $neoMarker -Value $neoVersion
+    }
 }
 
 # --- 3. Mods ----------------------------------------------------------------
@@ -67,13 +95,13 @@ Get-ChildItem $modsDir -Filter '*.jar' | Remove-Item -Force
 
 $projects = (Get-Setting $cfg 'MODRINTH_PROJECTS' '') -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 foreach ($slug in $projects) {
-    $loaders = [uri]::EscapeDataString('["neoforge"]')
+    $loaders = [uri]::EscapeDataString("[`"$($loader.ToLower())`"]")
     $games   = [uri]::EscapeDataString("[`"$mcVersion`"]")
     $api = "https://api.modrinth.com/v2/project/$slug/version?loaders=$loaders&game_versions=$games"
     $versions = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'create-server-tool' }
     $v = $versions | Where-Object { $_.version_type -eq 'release' } | Select-Object -First 1
     if (-not $v) { $v = $versions | Select-Object -First 1 }
-    if (-not $v) { throw "Modrinth has no NeoForge $mcVersion build of '$slug'. Remove it from MODRINTH_PROJECTS or put the jar in mods\." }
+    if (-not $v) { throw "Modrinth has no $loader $mcVersion build of '$slug'. Remove it from MODRINTH_PROJECTS or put the jar in mods\." }
     $file = $v.files | Where-Object { $_.primary } | Select-Object -First 1
     if (-not $file) { $file = $v.files | Select-Object -First 1 }
     Write-Host "Downloading $slug $($v.version_number)..."

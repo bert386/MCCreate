@@ -6,7 +6,7 @@ services:
     container_name: create-server
     env_file: server.env
     environment:
-      TYPE: NEOFORGE
+      TYPE: ${LOADER:-NEOFORGE}
       # Set by the start script when import-world/ holds a world: it is copied
       # in the first time the server starts (only if no world exists yet).
       WORLD: ${IMPORT_WORLD:-}

@@ -18,12 +18,17 @@ Open `server.env` in a text editor and:
 2. Check `MEMORY` (Create wants at least 4G; 6G-8G is better).
 3. For internet play, put your players' usernames in `WHITELIST` and yours in `OPS`.
 
-Today it uses official Create 6.0.10 on Minecraft 1.21.1. To use a different
-Create build (for example our 26.1.2 port once it's ready), put the jar in
-`mods/`, remove `create` from `MODRINTH_PROJECTS`, and change `VERSION`,
-`NEOFORGE_VERSION` and `JAVA_IMAGE_TAG` (the file shows the 26.1.2 values).
-Any other mods can be added the same way: a Modrinth slug in
-`MODRINTH_PROJECTS`, or a jar in `mods/`.
+`server.env` has two presets. Keep one un-commented:
+
+- **A (default):** official Create 6.0.10 on Minecraft 1.21.1 with NeoForge.
+- **B:** [Create Fly](https://modrinth.com/mod/create-fly), a community Fabric
+  port of Create, on Minecraft 26.1.2. Its authors warn that old saves may lose
+  data, so test with a copy of your world.
+
+Players need the same Minecraft version, loader and mod installed in their own
+game. To use your own Create build, put the jar in `mods/` and remove
+`create`/`create-fly` from `MODRINTH_PROJECTS`. Other mods can be added the same
+way: a Modrinth slug in `MODRINTH_PROJECTS`, or a jar in `mods/`.
 
 ## 2a. Run in Docker
 
