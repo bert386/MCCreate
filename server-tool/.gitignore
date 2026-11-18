@@ -1,0 +1,7 @@
+data/
+server/
+runtime/
+downloads/
+mods/*.jar
+import-world/*
+!import-world/.gitkeep
