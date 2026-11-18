@@ -1,0 +1,25 @@
+# Create server in Docker. Start it with docker-start.bat (Windows) or
+# ./docker-start.sh (Linux/macOS), which load the settings from server.env.
+services:
+  create-server:
+    image: itzg/minecraft-server:${JAVA_IMAGE_TAG:-java21}
+    container_name: create-server
+    env_file: server.env
+    environment:
+      TYPE: ${LOADER:-NEOFORGE}
+      # Set by the start script when import-world/ holds a world: it is copied
+      # in the first time the server starts (only if no world exists yet).
+      WORLD: ${IMPORT_WORLD:-}
+      # Copy any jars from mods/ into the server, removing ones you delete.
+      REMOVE_OLD_MODS: "TRUE"
+      # Players' address/port inside the container stays 25565.
+      SERVER_PORT: "25565"
+    ports:
+      - "${SERVER_PORT:-25565}:25565"
+    volumes:
+      - ./data:/data
+      - ./mods:/mods:ro
+      - ./import-world:/import-world:ro
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
